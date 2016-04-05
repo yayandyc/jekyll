@@ -74,7 +74,7 @@ module Jekyll
           actions = {}
           s3_resource.bucket(bucket_name).objects({prefix: prefix}).each do |objectsummary|
             if local_objects.has_key?(objectsummary.key)
-              if local_objects[objectsummary.key] == objectsummary.etag
+              if local_objects[objectsummary.key] == s3_resource.client.head_object({bucket: bucket_name, key: objectsummary.key}).metadata['object_hash']
                 actions[objectsummary.key] = "no_action"
               end
             else
