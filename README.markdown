@@ -1,58 +1,74 @@
 # [Jekyll](https://jekyllrb.com/)
 
-[![Gem Version](https://img.shields.io/gem/v/jekyll.svg)][ruby-gems]
-[![Build Status](https://travis-ci.org/jekyll/jekyll.svg?branch=master)][travis]
-[![Test Coverage](https://codeclimate.com/github/jekyll/jekyll/badges/coverage.svg)][coverage]
-[![Code Climate](https://codeclimate.com/github/jekyll/jekyll/badges/gpa.svg)][codeclimate]
-[![Dependency Status](https://gemnasium.com/jekyll/jekyll.svg)][gemnasium]
-[![Security](https://hakiri.io/github/jekyll/jekyll/master.svg)][hakiri]
-
-[ruby-gems]: https://rubygems.org/gems/jekyll
-[gemnasium]: https://gemnasium.com/jekyll/jekyll
-[codeclimate]: https://codeclimate.com/github/jekyll/jekyll
-[coverage]: https://codeclimate.com/github/jekyll/jekyll/coverage
-[hakiri]: https://hakiri.io/github/jekyll/jekyll/master
-[travis]: https://travis-ci.org/jekyll/jekyll
+This is a fork of the main [Jekyll project](https://github.com/jekyll/jekyll), with the added feature
+to build and deploy to Amazon S3 with a single command.
 
 Jekyll is a simple, blog-aware, static site generator perfect for personal, project, or organization sites. Think of it like a file-based CMS, without all the complexity. Jekyll takes your content, renders Markdown and Liquid templates, and spits out a complete, static website ready to be served by Apache, Nginx or another web server. Jekyll is the engine behind [GitHub Pages](https://pages.github.com), which you can use to host sites right from your GitHub repositories.
 
-## Philosophy
+## Installation
 
-Jekyll does what you tell it to do — no more, no less. It doesn't try to outsmart users by making bold assumptions, nor does it burden them with needless complexity and configuration. Put simply, Jekyll gets out of your way and allows you to concentrate on what truly matters: your content.
+Installation follows the same instructions as installing a [development version](https://jekyllrb.com/docs/installation/#pre-releases) of Jekyll.
 
-## Having trouble with OS X El Capitan?
+```bash
+$ git clone git://github.com/yayandyc/jekyll.git
+$ cd jekyll
+$ script/bootstrap
+$ bundle exec rake build
+$ ls pkg/*.gem | head -n 1 | xargs gem install -l
+```
 
-See: https://jekyllrb.com/docs/troubleshooting/#jekyll-amp-mac-os-x-1011
+## Usage
 
-## Getting Started
+Using this version of Jekyll is identical to using the standard Jekyll, with the additional command `jekyll deploy`, which does the deployment.
 
-* [Install](https://jekyllrb.com/docs/installation/) the gem
-* Read up about its [Usage](https://jekyllrb.com/docs/usage/) and [Configuration](https://jekyllrb.com/docs/configuration/)
-* Take a gander at some existing [Sites](https://wiki.github.com/jekyll/jekyll/sites)
-* [Fork](https://github.com/jekyll/jekyll/fork) and [Contribute](https://jekyllrb.com/docs/contributing/) your own modifications
-* Have questions? Check out our official forum community [Jekyll Talk](https://talk.jekyllrb.com/) or [`#jekyll` on irc.freenode.net](https://botbot.me/freenode/jekyll/)
+## Configuration
 
-## Code of Conduct
+In order to tell Jekyll where to deploy to, you will need to add some configuration to the `_config.yml` file of the site.
 
-In order to have a more open and welcoming community, Jekyll adheres to a
-[code of conduct](CONDUCT.markdown) adapted from the Ruby on Rails code of
-conduct.
+```yaml
+# S3 Deployment settings
+deploy_to: 's3://<bucket>[/<prefix>]'
+```
 
-Please adhere to this code of conduct in any interactions you have in the
-Jekyll community. It is strictly enforced on all official Jekyll
-repositories, websites, and resources. If you encounter someone violating
-these terms, please let a maintainer ([@parkr](https://github.com/parkr), [@envygeeks](https://github.com/envygeeks), or [@mattr-](https://github.com/mattr-)) know
-and we will address it as soon as possible.
+### AWS Configuration
 
-## Diving In
+In order to push objects to AWS, you will need to configure credentials to use for AWS. There are several options as to where you can store these credentials.
 
-* [Migrate](http://import.jekyllrb.com/docs/home/) from your previous system
-* Learn how the [YAML Front Matter](https://jekyllrb.com/docs/frontmatter/) works
-* Put information on your site with [Variables](https://jekyllrb.com/docs/variables/)
-* Customize the [Permalinks](https://jekyllrb.com/docs/permalinks/) your posts are generated with
-* Use the built-in [Liquid Extensions](https://jekyllrb.com/docs/templates/) to make your life easier
-* Use custom [Plugins](https://jekyllrb.com/docs/plugins/) to generate content specific to your site
+#### Shared AWS Credentials
+
+This is the approach to storing AWS credentials that is recommended by Amazon. It requires you to store the access key and secret in your user home directory under `~/.aws/credentials`.
+
+Using this method, you are required to add `region: 'your-region'` to the `_config.yml` configuration.
+
+See the [AWS Ruby docs](http://docs.aws.amazon.com/sdk-for-ruby/latest/DeveloperGuide/aws-ruby-sdk-getting-started.html#aws-ruby-sdk-credentials-shared) for more information on setting these credentials.
+
+#### Separate site credentials (recommended)
+
+This method is recommended as it stores the credentials in a separate file and can still be specific to the site.
+
+* Create a new directory in the site's root directory `_aws`
+* Add `_aws` to your `.gitignore` file (recommended)
+* In this directory, add a new file `_aws/credentials.yml`
+* Populate the file with the AWS credentials and the region to use
+```yaml
+access_key_id: 'your_access_key_id'
+secret_access_key: 'your_secret_access_key'
+region: 'your_region'
+```
+
+#### Site configured credentials
+
+This method is very similar to the above, but it relies on storing the credentials with the rest of
+the site configurations. While this makes some sense, it is not a great idea if your _config.yml file
+is under version control (especially if you have a public github repository).
+
+Add the AWS credentials and region to the `_config.yml` file:
+```yaml
+access_key_id: 'your_access_key_id'
+secret_access_key: 'your_secret_access_key'
+region: 'your_region'
+```
 
 ## License
 
-See the [LICENSE](https://github.com/jekyll/jekyll/blob/master/LICENSE) file.
+See the [LICENSE](https://github.com/yayandyc/jekyll/blob/master/LICENSE) file.
