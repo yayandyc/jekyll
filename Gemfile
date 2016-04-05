@@ -1,6 +1,8 @@
 source "https://rubygems.org"
 gemspec :name => "jekyll"
 
+gem "aws-sdk"
+
 gem "rake", "~> 11.0"
 group :development do
   gem "launchy", "~> 2.3"
