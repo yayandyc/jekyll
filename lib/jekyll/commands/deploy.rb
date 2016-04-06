@@ -74,7 +74,8 @@ module Jekyll
           actions = {}
           s3_resource.bucket(bucket_name).objects({prefix: prefix}).each do |objectsummary|
             if local_objects.has_key?(objectsummary.key)
-              if local_objects[objectsummary.key] == s3_resource.client.head_object({bucket: bucket_name, key: objectsummary.key}).metadata['object_hash']
+              remote_hash = objectsummary.etag.tr('"', '')
+              if local_objects[objectsummary.key] == remote_hash
                 actions[objectsummary.key] = "no_action"
               end
             else
@@ -102,8 +103,7 @@ module Jekyll
                 bucket.put_object({
                   acl: "public-read",
                   body: file,
-                  key: path,
-                  metadata: {object_hash: action}
+                  key: path
                 })
               end
               

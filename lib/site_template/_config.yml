@@ -25,3 +25,5 @@ github_username:  jekyll
 
 # Build settings
 markdown: kramdown
+
+deploy_to: "s3://your-bucket-name"
