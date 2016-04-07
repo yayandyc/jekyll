@@ -7,13 +7,16 @@ module Jekyll
       class << self
         def init_with_program(prog)
           prog.command(:deploy) do |c|
-            c.syntax 'deploy [options]'
+            c.syntax 'deploy [--deploy_to=DEPLOY_TO] [--aws_access_key_id=KEY --aws_secret_access_key=SECRET --aws_region=REGION]'
             c.description 'Deploy the site to the remote destination.'
 
             add_build_options(c)
             
             c.option 'deploy_to', '--deploy_to DEPLOY_TO', String, 'Deploy to a particular configuration'
-
+            c.option 'aws_access_key_id' '--aws_access_key_id ACCESS_KEY_ID', String, 'Use the provided AWS access key id for S3 deployment'
+            c.option 'aws_secret_access_key' '--aws_secret_access_key SECRET_ACCESS_KEY', String, 'Use the provided AWS secret access key for S3 deployment'
+            c.option 'aws_region' '--aws_region REGION', String, 'Use the provided AWS region for S3 deployment'
+            
             c.action do |_, options|
               Jekyll::Commands::Build.process(options)
               Jekyll::Commands::Deploy.process(options)
@@ -24,30 +27,33 @@ module Jekyll
         
         def process(options)
           options = configuration_from_options(options)          
-          Jekyll::Commands::Build.process(options)
           
           deploy_bits = options['deploy_to'].split('://');
                     
           case deploy_bits[0].downcase
           when 's3'
-            # Initialize the S3 Resource
-            s3_resource = initializeS3(options)
-            
-            # Work out the bucket and the prefix from the endpoint
-            bucket_bits = deploy_bits[1].split('/')
-            bucket_name = bucket_bits.shift
-            prefix = bucket_bits.join('/')
-            
-            # Prepare what changes need to be applied
-            local_objects = prepare_local(options['destination'], '')
-            object_actions = prepare_actions(s3_resource, bucket_name, prefix, local_objects)
-            
-            # Do the changes
-            deploy_to_s3(s3_resource, bucket_name, options['destination'], object_actions)
+            s3_deployment(deploy_bits, options)
           else
             Jekyll.logger.error("Unknown deployment location '" + options['deploy_to'] + "'")
             exit(1)
           end
+        end
+        
+        def s3_deployment(deploy_bits, options)
+          # Initialize the S3 Resource
+          s3_resource = initializeS3(options)
+          
+          # Work out the bucket and the prefix from the endpoint
+          bucket_bits = deploy_bits[1].split('/')
+          bucket_name = bucket_bits.shift
+          prefix = bucket_bits.join('/')
+          
+          # Prepare what changes need to be applied
+          local_objects = prepare_local(options['destination'], '')
+          object_actions = prepare_actions(s3_resource, bucket_name, prefix, local_objects)
+          
+          # Do the changes
+          deploy_to_s3(s3_resource, bucket_name, options['destination'], object_actions)
         end
         
         def prepare_local(local_base, local_path)
@@ -112,15 +118,23 @@ module Jekyll
         end
         
         def initializeS3(options)
-          if !!options['aws']
+          
+          if(!!options['aws_access_key_id'] && !!options['aws_secret_access_key'] && !!options['aws_region'])
+            # There is some credentials in the yaml file
+            Aws::S3::Resource.new(
+              access_key_id: options['aws_access_key_id'],
+              secret_access_key: options['aws_secret_access_key'],
+              region: options['aws_region']
+            )
+          elsif !!options['aws']
             # There is some credentials in the yaml file
             Aws::S3::Resource.new(
               access_key_id: options['aws']['access_key_id'],
               secret_access_key: options['aws']['secret_access_key'],
               region: options['aws']['region']
             )
-          elsif File.exist?('_aws/credentials.yml')
-            config = SafeYAML.load_file('_aws/credentials.yml')
+          elsif File.exist?('_secrets/aws.yml')
+            config = SafeYAML.load_file('_secrets/aws.yml')
             # There is a aws credentials file specific to this site
             Aws::S3::Resource.new(
               access_key_id: config['access_key_id'],
