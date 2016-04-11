@@ -2,6 +2,7 @@ source "https://rubygems.org"
 gemspec :name => "jekyll"
 
 gem "aws-sdk"
+gem "ruby-filemagic"
 
 gem "rake", "~> 11.0"
 group :development do

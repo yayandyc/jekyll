@@ -1,5 +1,6 @@
 require 'aws-sdk'
 require 'digest/md5'
+require 'filemagic'
 
 module Jekyll
   module Commands
@@ -7,15 +8,16 @@ module Jekyll
       class << self
         def init_with_program(prog)
           prog.command(:deploy) do |c|
-            c.syntax 'deploy [--deploy_to=DEPLOY_TO] [--aws_access_key_id=KEY --aws_secret_access_key=SECRET --aws_region=REGION]'
+            c.syntax 'deploy [--force_deploy] [--deploy_to=DEPLOY_TO] [--aws_access_key_id=KEY --aws_secret_access_key=SECRET --aws_region=REGION]'
             c.description 'Deploy the site to the remote destination.'
 
             add_build_options(c)
             
             c.option 'deploy_to', '--deploy_to DEPLOY_TO', String, 'Deploy to a particular configuration'
-            c.option 'aws_access_key_id' '--aws_access_key_id ACCESS_KEY_ID', String, 'Use the provided AWS access key id for S3 deployment'
-            c.option 'aws_secret_access_key' '--aws_secret_access_key SECRET_ACCESS_KEY', String, 'Use the provided AWS secret access key for S3 deployment'
-            c.option 'aws_region' '--aws_region REGION', String, 'Use the provided AWS region for S3 deployment'
+            c.option 'aws_access_key_id', '--aws_access_key_id ACCESS_KEY_ID', String, 'Use the provided AWS access key id for S3 deployment'
+            c.option 'aws_secret_access_key', '--aws_secret_access_key SECRET_ACCESS_KEY', String, 'Use the provided AWS secret access key for S3 deployment'
+            c.option 'aws_region', '--aws_region REGION', String, 'Use the provided AWS region for S3 deployment'
+            c.option 'force_deploy', '--force_deploy', 'Force all objects to be updated'
             
             c.action do |_, options|
               Jekyll::Commands::Build.process(options)
@@ -26,7 +28,8 @@ module Jekyll
         end
         
         def process(options)
-          options = configuration_from_options(options)          
+          options = configuration_from_options(options)
+          options['force_deploy'] = false unless options.key?('force_deploy')
           
           deploy_bits = options['deploy_to'].split('://');
                     
@@ -41,7 +44,8 @@ module Jekyll
         
         def s3_deployment(deploy_bits, options)
           # Initialize the S3 Resource
-          s3_resource = initializeS3(options)
+          initialize_aws(options)
+          s3_resource = Aws::S3::Resource.new
           
           # Work out the bucket and the prefix from the endpoint
           bucket_bits = deploy_bits[1].split('/')
@@ -50,10 +54,10 @@ module Jekyll
           
           # Prepare what changes need to be applied
           local_objects = prepare_local(options['destination'], '')
-          object_actions = prepare_actions(s3_resource, bucket_name, prefix, local_objects)
+          object_actions = prepare_actions(s3_resource, bucket_name, prefix, local_objects, options['force_deploy'])
           
           # Do the changes
-          deploy_to_s3(s3_resource, bucket_name, options['destination'], object_actions)
+          deploy_to_s3(s3_resource, bucket_name, options['destination'], object_actions, options)
         end
         
         def prepare_local(local_base, local_path)
@@ -76,13 +80,15 @@ module Jekyll
           return ret
         end
         
-        def prepare_actions(s3_resource, bucket_name, prefix, local_objects)
+        def prepare_actions(s3_resource, bucket_name, prefix, local_objects, force_update)
           actions = {}
           s3_resource.bucket(bucket_name).objects({prefix: prefix}).each do |objectsummary|
             if local_objects.has_key?(objectsummary.key)
               remote_hash = objectsummary.etag.tr('"', '')
-              if local_objects[objectsummary.key] == remote_hash
+              if local_objects[objectsummary.key] == remote_hash && !force_update
                 actions[objectsummary.key] = "no_action"
+              else
+                actions[objectsummary.key] = "update"
               end
             else
               actions[objectsummary.key] = "delete"
@@ -91,7 +97,7 @@ module Jekyll
           local_objects.merge(actions)
         end
         
-        def deploy_to_s3(s3_resource, bucket_name, local_root, object_actions)
+        def deploy_to_s3(s3_resource, bucket_name, local_root, object_actions, options)
           bucket = s3_resource.bucket(bucket_name)
           object_actions.each do |path, action|
             case action
@@ -104,46 +110,95 @@ module Jekyll
               puts "#{path} is unchanged"              
             else
               #Update boiii!
+              #Determine the MIME type
+              mime_type = naive_mime_type("#{local_root}/#{path}")
               puts "Pushing #{path} to #{bucket_name}"
               File.open("#{local_root}/#{path}", 'rb') do |file|
                 bucket.put_object({
                   acl: "public-read",
                   body: file,
-                  key: path
+                  key: path,
+                  content_type: mime_type
                 })
               end
-              
             end
+          end
+          
+          items_to_update = object_actions.select {|k,v| v == "update"}
+          invalidate_cloudfront_cache(options, items_to_update) if items_to_update.length > 0
+        end
+        
+        def invalidate_cloudfront_cache(options, items_to_invalidate)
+          if !!options['cloudfront']['region']
+            cloudfront = Aws::CloudFront::Client.new(
+              region: options['cloudfront']['region']
+            )
+          else
+            cloudfront = Aws::CloudFront::Client.new
+          end
+          
+          cloudfront.create_invalidation({
+            distribution_id: options['cloudfront']['distribution_id'], 
+            invalidation_batch: { 
+              paths: { 
+                quantity: items_to_invalidate.length,
+                items: items_to_invalidate.keys,
+              },
+              caller_reference: "utc_" + Time.now.utc.to_i.to_s,
+            },
+          })
+        end
+        
+        def naive_mime_type(filepath)
+          extension = filepath.split('.').pop
+          case extension
+          when 'html'
+            "text/html"
+          when 'css'
+            "text/css"
+          when 'js'
+            "application/javascript"
+          when 'svg'
+            "image/svg+xml"
+          when 'png'
+            "image/png"
+          when 'jpg', 'jpeg'
+            "image/jpeg"
+          when 'gif'
+            "image/gif"
+          else
+            FileMagic.new(FileMagic::MAGIC_MIME).file(filepath)
           end
         end
         
-        def initializeS3(options)
-          
+        def initialize_aws(options)
           if(!!options['aws_access_key_id'] && !!options['aws_secret_access_key'] && !!options['aws_region'])
-            # There is some credentials in the yaml file
-            Aws::S3::Resource.new(
-              access_key_id: options['aws_access_key_id'],
-              secret_access_key: options['aws_secret_access_key'],
-              region: options['aws_region']
-            )
+            # There is some credentials in the command line
+            AWS.config({
+              :access_key_id => options['aws_access_key_id'],
+              :secret_access_key => options['aws_secret_access_key'],
+              :region => options['aws_region']
+            })
           elsif !!options['aws']
             # There is some credentials in the yaml file
-            Aws::S3::Resource.new(
-              access_key_id: options['aws']['access_key_id'],
-              secret_access_key: options['aws']['secret_access_key'],
-              region: options['aws']['region']
-            )
+            AWS.config({
+              :access_key_id => options['aws']['access_key_id'],
+              :secret_access_key => options['aws']['secret_access_key'],
+              :region => options['aws']['region']
+            })
           elsif File.exist?('_secrets/aws.yml')
             config = SafeYAML.load_file('_secrets/aws.yml')
             # There is a aws credentials file specific to this site
-            Aws::S3::Resource.new(
-              access_key_id: config['access_key_id'],
-              secret_access_key: config['secret_access_key'],
-              region: config['region']
-            )
+            AWS.config({
+              :access_key_id => config['access_key_id'],
+              :secret_access_key => config['secret_access_key'],
+              :region => config['region']
+            })
           elsif File.exist?(File::expand_path('~/.aws/credentials'))
             # There is shared aws credentials
-            Aws::S3::Resource.new({region: options['aws_region']})
+            AWS.config({
+              :region => config['region']
+            })
           else
             # There is no aws credentials
             Jekyll.logger.error("There is no known AWS credentials for S3 deployment!")
